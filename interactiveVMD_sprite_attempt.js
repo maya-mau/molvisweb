@@ -88,7 +88,7 @@ var prevRep = null;
 globalThis.numRepTabs = numRepTabs;
 globalThis.currentRep = currentRep;
 
-const maxRepTabs = 4;
+const maxRepTabs = 3;
 
 let guis = [];
 let tabs = [];
@@ -133,58 +133,40 @@ init();
 
 //animate();
 
-// init function - sets up scene, camera, renderer, controls, and GUIs 
-function init() {
+function setupCamera () {
+    let box = getVisibleBoundingBox();
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    let maxDim = Math.max(size.x, size.y, size.z);
 
-    // initialize main window 
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color( 0x000000 );
-    globalThis.scene = scene;
-    
-    container = document.getElementsByClassName('column middle')[0]; 
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
+    const center = new THREE.Vector3();
+    box.getCenter(center);
 
-    document.addEventListener('keydown', function(event) {
-        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
-            console.log('in preventDefault');
-            event.preventDefault(); 
-        }
-    }); 
-    
-    //addAxes();
-    
-    if (cameraOption == 'orthographic') {
-            
-        // TODO need to edit these to be dynamic based on the molecule maybe
-        let w = containerWidth;
-        let h = containerHeight;
-        console.log(w, h);
-        let viewSize = h;
-        let aspectRatio = w / h;
-    
-        let left = (-aspectRatio * viewSize) / 2;
-        let right = (aspectRatio * viewSize) / 2;
-        let top = viewSize / 2;
-        let bottom = -viewSize / 2;
-        let near = -10000;
-        let far = 10000; 
-    
-        camera = new THREE.OrthographicCamera(left, right, top, bottom, near, far);
-        //camera.position.z = 1000;
-        camera.position.set(0, 0, 10);
+    let aspectRatio = window.innerWidth / window.innerHeight;
 
-            
-    } else {
-        camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 5000 );
-        camera.position.z = 1000;
-    }
+    let viewSize = Math.max(size.x, size.y, size.z);   
+    let left = -aspectRatio * viewSize / 2;
+    let right = aspectRatio * viewSize / 2;
+    let top = viewSize / 2;
+    let bottom = -viewSize / 2;
+    let near = 1;   
+    let far = 10000;   
+
+    // Create the orthographic camera
+    camera.left = left;
+    camera.right = right;
+    camera.top = top;
+    camera.bottom = bottom;
+    camera.near = near;
+    camera.far = far;
+
+    camera.position.set(center.x, center.y, maxDim * 2);
 
     globalThis.camera = camera;
-    scene.add( camera );
-    camera.layers.enable(0);
-    camera.layers.enable(1);
+    scene.add(camera);
+}
 
+function setupLights() {
     // object needs to be illuminated to be visible // TODO, could work on this, lighting is kind of strange
     var ambientLight = new THREE.AmbientLight ( 0xffffff, 1);
     scene.add( ambientLight );
@@ -196,69 +178,50 @@ function init() {
     const light2 = new THREE.DirectionalLight( 0xffffff, 1.5 );
     light2.position.set(  1, - 1, -1 );
     scene.add( light2 );
+}
 
-    // root contains all the objects of the scene 
-    scene.add( root );
-    root.visible = true;
 
-    // renderer makes scene visible 
-    renderer = new THREE.WebGLRenderer( { antialias: true } );
-    renderer.setPixelRatio(window.devicePixelRatio);
+function setupControls() {
+    //controls = new OrbitControls( camera, renderer.domElement );
+    const clock = new THREE.Clock();
+    controls = new CameraControls( camera, renderer.domElement );
 
-    // place the scene in the column middle window 
-    renderer.setSize(containerWidth, containerHeight);
-    renderer.domElement.id = 'canvas';
-    container.appendChild(renderer.domElement);
+    ( function anim () {
 
-    // allow user to move around the molecule 
-    if (cameraOption == 'orthographic') {
-        //controls = new OrbitControls( camera, renderer.domElement );
-        const clock = new THREE.Clock();
-        controls = new CameraControls( camera, renderer.domElement );
+        // snip
+        const delta = clock.getDelta();
+        const hasControlsUpdated = controls.update( delta );
+    
+        requestAnimationFrame( anim );
+        renderer.render( scene, camera );
+    
+    } )();
 
-        ( function anim () {
+    //controls.listenToKeyEvents( window ); // optional
 
-            // snip
-            const delta = clock.getDelta();
-            const hasControlsUpdated = controls.update( delta );
-        
-            requestAnimationFrame( anim );
-            renderer.render( scene, camera );
-        
-        } )();
+    controls.addEventListener( 'update', render ); // call this only in static scenes (i.e., if there is no animation loop)
+    //controls.setLookAt(0, 0, 100, 0, 0, 0); // Adjust based on molecule's position
+    camera.lookAt(controls.getTarget(new THREE.Vector3));
+    
+    const moveSpeed = 0.4;
 
-        //controls.listenToKeyEvents( window ); // optional
-
-		controls.addEventListener( 'update', render ); // call this only in static scenes (i.e., if there is no animation loop)
-        controls.setLookAt(0, 0, 100, 0, 0, 0); // Adjust based on molecule's position
-        camera.lookAt(controls.getTarget(new THREE.Vector3));
-        
-        const moveSpeed = 0.4;
-
-        // Event listener for key presses
-        document.addEventListener("keydown", (event) => {
-            switch (event.code) {
-                case "ArrowRight":  
-                controls.truck(moveSpeed, 0, true);
-                    break;
-                case "ArrowLeft":   
-                    controls.truck(-moveSpeed, 0, true);
-                    break;
-                case "ArrowDown":   
-                    controls.truck(0, moveSpeed, true);
-                    break;
-                case "ArrowUp":     
-                    controls.truck(0, -moveSpeed, true);
-                    break;
-            }
-        });
-
-		
-    } else {
-        controls = new TrackballControls( camera, renderer.domElement ); // TODO, controls zooming out boundaries
-        controls.minDistance = 100;
-        controls.maxDistance = 3000;
-    }
+    // Event listener for key presses
+    document.addEventListener("keydown", (event) => {
+        switch (event.code) {
+            case "ArrowRight":  
+            controls.truck(moveSpeed, 0, true);
+                break;
+            case "ArrowLeft":   
+                controls.truck(-moveSpeed, 0, true);
+                break;
+            case "ArrowDown":   
+                controls.truck(0, moveSpeed, true);
+                break;
+            case "ArrowUp":     
+                controls.truck(0, -moveSpeed, true);
+                break;
+        }
+    });
 
     initialPosition = camera.position.clone();
     initialQuaternion = camera.quaternion.clone();
@@ -268,9 +231,93 @@ function init() {
     console.log('initialTarget', initialTarget);
     console.log('initialTarget.x', initialTarget.x);
 
+}
+
+function setupRenderer() {
+    container = document.getElementsByClassName('column middle')[0]; 
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(containerWidth, containerHeight);
+    renderer.domElement.id = 'canvas';
+    container.appendChild(renderer.domElement);
+}
+
+
+
+// init function - sets up scene, camera, renderer, controls, and GUIs 
+function init() {
+
+    // initialize main window 
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color( 0x000000 );
+    globalThis.scene = scene;
+
+    document.addEventListener('keydown', function(event) {
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
+            console.log('in preventDefault');
+            event.preventDefault(); 
+        }
+    }); 
+    
+    //addAxes();
+
+    camera = new THREE.OrthographicCamera(0,0,0,0,0,0);
+
     // the default/first molecule to show up 
     loadMolecule( defaultParams.mculeParams.molecule, CPK, currentRep );
+    
+    setupCamera();
+    setupLights();
 
+    // root contains all the objects of the scene 
+    scene.add( root );
+    root.visible = true;
+
+    setupRenderer();
+
+    setupControls();
+
+    /* // allow user to move around the molecule 
+    if (cameraOption == 'orthographic') {
+        //controls = new OrbitControls( camera, renderer.domElement );
+        const clock = new THREE.Clock();
+        controls = new CameraControls( camera, renderer.domElement );
+
+
+        function animateControls() {
+
+            requestAnimationFrame(animateControls);
+    
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    
+        animateControls();
+
+		controls.addEventListener( 'update', render ); // call this only in static scenes (i.e., if there is no animation loop)
+        controls.setLookAt(0, 0, 100, 0, 0, 0); // Adjust based on molecule's position
+        camera.lookAt(controls.getTarget(new THREE.Vector3));
+         
+        
+
+		
+    } else {
+        controls = new TrackballControls( camera, renderer.domElement ); // TODO, controls zooming out boundaries
+        controls.minDistance = 100;
+        controls.maxDistance = 3000;
+    }*/
+
+    initialPosition = camera.position.clone();
+    initialQuaternion = camera.quaternion.clone();
+    //initialTarget = controls.target.clone();
+    //initialTarget = new THREE.Vector3(controls.target.x, controls.target.y, controls.target.z);
+    controls.getTarget(initialTarget);
+    console.log('initialTarget', initialTarget);
+    console.log('initialTarget.x', initialTarget.x);
+
+    
     // dynamic screen size 
     window.addEventListener( 'resize', onWindowResize );
 
@@ -488,6 +535,37 @@ function resetGUIs() {
     }
 }
 
+function hideAtomVisibility(instanceIndex, instancedMesh) {
+    const matrix = new THREE.Matrix4();
+    instancedMesh.getMatrixAt(instanceIndex, matrix);
+
+    const scale = new THREE.Vector3();
+    matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+
+    scale.set(0, 0, 0);  // Scale to zero to hide the atom
+
+    matrix.compose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    instancedMesh.setMatrixAt(instanceIndex, matrix);
+    instancedMesh.instanceMatrix.needsUpdate = true;
+}
+
+
+// Function to show an instance
+function showAtomVisibility(instanceIndex, instancedMesh) {
+    const matrix = new THREE.Matrix4();
+    instancedMesh.getMatrixAt(instanceIndex, matrix);
+
+    const scale = new THREE.Vector3();
+    matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+
+    scale.set(1, 1, 1);  // Restore normal scale to show the atom
+
+    matrix.compose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    instancedMesh.setMatrixAt(instanceIndex, matrix);
+    instancedMesh.instanceMatrix.needsUpdate = true;
+}
+
+
 // creates a new copy of atoms and bonds for every tab
 // from the given pdb and given representation style, 
 // then loads default molecul (rep 0, CPK) into scene 
@@ -525,12 +603,12 @@ function loadMolecule(model, representation, rep) {
         residues = pdb.residues;
         chains = pdb.chains;
          
-        let sphereGeometry, boxGeometry;
+        //let sphereGeometry, boxGeometry;
 
-        // pre-build geometries for atoms and bonds
-        let sphereGeometryCPK = new THREE.IcosahedronGeometry(1/3, detail );
-        let boxGeometryCPK = new THREE.BoxGeometry( 1/75, 1/75, 0.6 );
-        let sphereGeometryVDWCache = {};
+        //let boxGeometryCPK = new THREE.BoxGeometry( 1/75, 1/75, 0.6 );
+        let atomInstanceVDWCache = {};
+
+
         
         //starting setup to put atoms into scene 
         geometryAtoms.computeBoundingBox();
@@ -544,18 +622,43 @@ function loadMolecule(model, representation, rep) {
         const colors = geometryAtoms.getAttribute( 'color' );
         const position = new THREE.Vector3();
         
-        root.visible = true;
     
         let atomStartTime = new Date();
 
-        // LOAD IN ATOMS 
-        for ( let i = 0; i < positions.count; i ++ ) {
 
-            // loop through the positions array to get every atom 
-            position.x = positions.getX( i );
-            position.y = positions.getY( i );
-            position.z = positions.getZ( i );
-            
+        let atomCount = positions.count * maxRepTabs * reps.length;
+        let bondCount = (geometryBonds.getAttribute('position').count / 2) * maxRepTabs * reps.length;
+
+
+        // dictionaries to store metadata for each instancedMesh
+        let atomCPKdata = {};
+        let atomVDWdata = {};
+
+        // InstancedMesh for CPK atoms
+        let atomGeometryCPK = new THREE.IcosahedronGeometry(1/3, detail);
+        let atomMaterialCPK = new THREE.MeshPhongMaterial();
+        let atomInstanceCPK = new THREE.InstancedMesh(atomGeometryCPK, atomMaterialCPK, atomCount);
+        atomInstanceCPK.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        let atomIndexCPK = 0;
+
+        // InstancedMesh for CPK bonds
+        let boxGeometryCPK = new THREE.BoxGeometry(0.08, 0.08, 0.6);
+        let bondMaterialCPK = new THREE.MeshPhongMaterial({ color: 0xffffff });
+        let bondInstancedMeshCPK = new THREE.InstancedMesh(boxGeometryCPK, bondMaterialCPK, bondCount);
+        bondInstancedMeshCPK.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        let bondIndexCPK = 0;
+
+        // InstancedMesh for VDW atoms
+        let atomInstanceVDW;
+
+
+        // LOAD IN ATOMS 
+        for ( let i = 0; i < positions.count; i++ ) {
+
+            position.set(positions.getX(i), positions.getY(i), positions.getZ(i));
+            let matrix = new THREE.Matrix4();
+            matrix.setPosition(position);
+
             // create a set of atoms/bonds for each tab
             for (let n = 0; n < maxRepTabs; n++) {
                 //console.log('loaded atoms for tab', n);
@@ -563,6 +666,7 @@ function loadMolecule(model, representation, rep) {
                 // create a set of atoms/bonds in each of the 3 styles for each tab
                 for (let key of reps) {
                     //console.log('loaded atoms for style', key);
+                    let data;
                     
                     let atomName = json_atoms.atoms[i][7];
                     let residue = json_atoms.atoms[i][5];
@@ -571,66 +675,83 @@ function loadMolecule(model, representation, rep) {
 
                     let color = new THREE.Color().setRGB(colors.getX( i ), colors.getY( i ), colors.getZ( i ));
 
-                    let material = new THREE.MeshPhongMaterial();
-                    material.color = color;
+                    /* let material = new THREE.MeshPhongMaterial();
+                    material.color = color; */
+                    
+                    // make instances of VDW and CPK atoms
 
                     if (key == VDW) {
                         
-                        // if element doesn't yet exist in VDW cache, create a new geometry and add it
-                        if (!(atomName in sphereGeometryVDWCache)) {
+                        // if element doesn't yet exist in VDW cache, create a new instance and add it
+                        if (!(atomName in atomInstanceVDWCache)) {
                             let rad = getRadius(json_atoms.atoms[i][4]) * 0.7; 
                         
-                            sphereGeometry = new THREE.IcosahedronGeometry(rad, detail);
-                            sphereGeometryVDWCache[atomName] = sphereGeometry;
+                            let atomGeometryVDW = new THREE.IcosahedronGeometry(rad, detail);
+                            atomInstanceVDW = new THREE.InstancedMesh(atomGeometryVDW, atomMaterialCPK, atomCount);
+
+                            atomInstanceVDWCache[atomName] = atomInstanceVDW;
                                                     
-                        } else {
-                            sphereGeometry = sphereGeometryVDWCache[atomName];
-                        }
+                        } 
+
+                        atomInstanceVDW = atomInstanceVDWCache[atomName];
+                        atomInstanceVDW.setMatrixAt(atomIndexCPK, matrix);
+                        atomInstanceVDW.setColorAt(atomIndexCPK, color);
+                        atomIndexCPK++;
+
+                        data = atomVDWdata;
 
                     } else if (key == CPK) {
-                        sphereGeometry = sphereGeometryCPK;
+                        //sphereGeometry = sphereGeometryCPK;
+
+                        atomInstanceCPK.setMatrixAt(atomIndexCPK, matrix);
+                        atomInstanceCPK.setColorAt(atomIndexCPK, color);
+                        atomIndexCPK++;
+
+                        data = atomCPKdata;
 
                     } else if (key == lines) { // skip loading lines
                         continue;
                     }
         
                     // create atom object that is a sphere with the position, color, and content we want 
-                    const object = new THREE.Mesh( sphereGeometry, material );
-                    object.layers.set(0);
-                    object.position.copy( position );
+                    //const object = new THREE.Mesh( sphereGeometry, material );
+                    //object.layers.set(0);
+                    //object.position.copy( position );
         
-                    object.molecularElement = "atom";
-                    object.style = key;
-                    object.repNum = n;
-                    object.residue = residue;
-                    object.chain = chain;
-                    object.atomName = atomName; // json_atoms.atoms[i][7]
-                    object.resName = resName;
-                    object.printableString = resName + residue.toString() + ':' + atomName.toUpperCase();
-                    object.atomInfoSprite = null;
+                    data['molecularElement'] = "atom";
+                    data['style'] = key;
+                    data['repNum'] = n;
+                    data['residue'] = residue;
+                    data['chain'] = chain;
+                    data['atomName'] = atomName; // json_atoms.atoms[i][7]
+                    data['resName'] = resName;
+                    data['printableString'] = resName + residue.toString() + ':' + atomName.toUpperCase();
+                    data['atomInfoSprite'] = null;
 
-                    /* console.log('residue', residue);
-                    console.log('atomName', atomName);
-                    console.log('resName', resName);*/
-
-                    object.originalColor = new THREE.Color().setRGB(colors.getX( i ), colors.getY( i ), colors.getZ( i ));
-
-                    object.material.color.set(color);
+                    data['originalColor'] = color;
                     
                     // reference to original pdb within object for raycaster 
-                    object.atomValue = i; 
+                    data['atomValue'] = i; 
         
                     // add atom object to scene 
-                    root.add( object );
 
-                    if (key == representation && n == rep) {
+                    /* if (key == representation && n == rep) { TODO 
                         object.visible = true;
                     } else {
                         object.visible = false;
-                    }
+                    } */
                 }
             } 
         }
+
+        atomInstanceCPK.instanceMatrix.needsUpdate = true;
+        atomInstanceCPK.instanceColor.needsUpdate = true;
+        root.add(atomInstanceCPK);
+
+        atomInstanceVDW.instanceMatrix.needsUpdate = true;
+        atomInstanceVDW.instanceColor.needsUpdate = true;
+        root.add(atomInstanceVDW);
+
 
         let atomEndTime = new Date();
         calculateTime(atomStartTime, atomEndTime, 'time to load atoms');
@@ -641,7 +762,7 @@ function loadMolecule(model, representation, rep) {
         const start = new THREE.Vector3();
         const end = new THREE.Vector3();
 
-        for ( let i = 0; i < positions.count; i += 2 ) {
+        /* for ( let i = 0; i < positions.count; i += 2 ) {
 
             let bond = json_bonds[i/2]; // loops through bonds 0 to however many bonds there are, divide by 2 because i increments by 2 
             
@@ -752,7 +873,7 @@ function loadMolecule(model, representation, rep) {
                     }  
                 }
             }
-        }
+        } */
 
         let bondEndTime = new Date();
         calculateTime(bondStartTime, bondEndTime, 'time to load bonds');
@@ -2586,7 +2707,7 @@ function handleMouseClick(mx,my,clickNear,clickFar) {
 // on click 
 function raycast(event) {
 
-    if (event.shiftKey) {
+    /* if (event.shiftKey) {
 
         event.preventDefault();
         var click = convertMousePositionToNDC(event);
@@ -2599,11 +2720,9 @@ function raycast(event) {
         var after1 = vectorToString(clickPositionNear);
         var after2 = vectorToString(clickPositionFar);
         var infoElt = document.getElementById('info');
-        /* infoElt.innerHTML = ("onMouseClick: button "+evt.button
-                            +" at "+before1+' and '+before2
-                            + " unprojects to "+after1+' and '+after2); */
+        
         handleMouseClick(click.x, click.y, clickPositionNear, clickPositionFar );
-    }
+    } */
 
     //get mouse location specific to given container size 
     var rect = renderer.domElement.getBoundingClientRect();
@@ -2616,11 +2735,11 @@ function raycast(event) {
     //raycaster.precision = 1;
     //raycaster.params.Points.threshold = 0.2;
 
-    console.log(raycaster);
+    //console.log(raycaster);
 
     // does the mouse intersect with an object in our scene?
     let intersects = raycaster.intersectObjects(scene.children);
-    //console.log("intersects", intersects);
+    console.log("intersects", intersects);
    
     if (intersects.length > 0) { // if there are objects intersecting with the mouse
 
@@ -2888,3 +3007,5 @@ function getRadius(atom){
 
     return rad; 
 }
+
+
