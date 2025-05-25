@@ -12,14 +12,7 @@ CameraControls.install( { THREE: THREE } );
 const CPK = 'Ball-and-stick';
 const VDW = 'Space filling';
 const lines = 'Lines';
-const reps = [CPK, VDW, lines];
-
-let bondMetadata = [];
-let metadataMap = new Map();
-globalThis.metadataMap = metadataMap;
-
-let CPKbonds = 0;
-let linesBonds = 0;
+const reps = [VDW, CPK, lines];
 
 const MOLECULES = {
     'Ponatinib': 'ponatinib_Sep2022.pdb',
@@ -31,6 +24,7 @@ const MOLECULES = {
 const residue = 'residue';
 const molecule = 'molecule';
 const distance = 'distance';
+//const selectionMethods = [residue, molecule, distance];
 
 const hidden = 'hidden';
 const shown = 'shown';
@@ -44,18 +38,13 @@ const green = 'Green';
 const detail = 2;
 const textSize = 5;
 
-const sphereScaleCPK = 0.25;
-const sphereScaleVDW = 0.8;
-
-const zeroScale = new THREE.Vector3(0, 0, 0);
-const identityScale = new THREE.Vector3(1, 1, 1);  
-
 // tab IDs
 const usedTabIDs = new Set();
 const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 const shapes = [ "★", "☆", "♥", "●", "◆", "▲", "■", "□", "△", "○", "✿", "▰", 
-    "▱", "▮", "▯" ];
+    "▱", "▮", "▯"
+];
 
 const repsData = [];
 
@@ -68,18 +57,17 @@ let repDataDefault = {
     state: shown
 }
 
+let numComplexObjs = 0; 
+let numSimpleObjs = 0;
+
 // initialize the baseline objects  
 let camera, scene, renderer, container;
 let controls;
 let root = new THREE.Group();
 let geometryAtoms, geometryBonds, json_atoms, json_bonds, json_bonds_manual, json_bonds_conect, residues, chains;
-let raycaster, mouse = {x: 0, y: 0 }
-
-let atomInstancedMeshCPK, atomInstancedMeshVDW, bondInstancedMeshLines, bondInstancedMeshCPK;
-let instancedMeshArray = [];
+var raycaster, mouse = {x: 0, y: 0 }
 
 const cameraOption = 'orthographic';
-const drawRay = false;
 
 let initialPosition, initialQuaternion;
 let initialTarget = new THREE.Vector3(0,0,0);
@@ -113,7 +101,7 @@ const hideShowButton = document.getElementById('hide-show-rep');
 
 var currentMolecule = 'caffeine.pdb';
 var currentStyle = defaultParams.repParams.representation;
-var currentSelectionMethod = 'residue';
+var currentSelectionMethod = residue;
 var currentSelectionValue = defaultParams.residueParams.residue;
 
 var numRepTabs = 1;
@@ -136,6 +124,7 @@ const backboneAtoms = ['c', 'ca', 'n', 'o'];
 // set key controls
 let isDistanceMeasurementMode = false;
 let isCenterMode = false;
+let isTranslateMode = false;
 
 // amount of molecule selected, may change
 var residueSelected = defaultParams.residueParams.residue; // default all
@@ -148,89 +137,84 @@ raycaster.far = Infinity;
 raycaster.params.Points.threshold = 0.1; 
 raycaster.params.Line.threshold = 0.1;  
 
-function setUpCamera() {
+init();
 
-    if (cameraOption == 'orthographic') {
 
-        let box = getVisibleBoundingBox();
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        let maxDim = Math.max(size.x, size.y, size.z);
+// init function - sets up scene, camera, renderer, controls, and GUIs 
+function init() {
 
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-
-        let aspectRatio = window.innerWidth / window.innerHeight;
-
-        let paddingFactor = 1.1;
-        let viewSize = Math.max(size.x, size.y, size.z) * paddingFactor;
-
-        let left = -aspectRatio * viewSize / 2;
-        let right = aspectRatio * viewSize / 2;
-        let top = viewSize / 2;
-        let bottom = -viewSize / 2;
-        let near = 1;   
-        let far = 10000;   
-
-        // Create the orthographic camera
-        camera.left = left;
-        camera.right = right;
-        camera.top = top;
-        camera.bottom = bottom;
-        camera.near = near;
-        camera.far = far;
-
-        camera.position.set(center.x, center.y, maxDim * 2);
-
-        camera.updateProjectionMatrix();
-
-    } else {
-        camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 5000 );
-        camera.position.z = 1000;
-
-        globalThis.camera = camera;
-        scene.add(camera);
-    }        
-
-    globalThis.camera = camera;
-    scene.add(camera);
-
-    initialPosition = camera.position.clone();
-    initialQuaternion = camera.quaternion.clone();
-}
-
-function setUpLights() {
-    scene.add(new THREE.AmbientLight(0xffffff, 1));
-
-    const light1 = new THREE.DirectionalLight(0xffffff, 2.5);
-    light1.position.set(1, 1, 1);
-    scene.add(light1);
-
-    const light2 = new THREE.DirectionalLight(0xffffff, 1.5);
-    light2.position.set(1, -1, -1);
-    scene.add(light2);
-}
-
-function setUpRenderer() {
+    // initialize main window 
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color( 0x000000 );
+    globalThis.scene = scene;
+    
     container = document.getElementsByClassName('column middle')[0]; 
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    renderer = new THREE.WebGLRenderer({ antialias: false });
+    //addAxes();
+    
+    if (cameraOption == 'orthographic') {
+            
+        // TODO need to edit these to be dynamic based on the molecule maybe
+        let w = containerWidth;
+        let h = containerHeight;
+        console.log(w, h);
+        let viewSize = h;
+        let aspectRatio = w / h;
+    
+        let left = (-aspectRatio * viewSize) / 2;
+        let right = (aspectRatio * viewSize) / 2;
+        let top = viewSize / 2;
+        let bottom = -viewSize / 2;
+        let near = -10000;
+        let far = 10000; 
+    
+        camera = new THREE.OrthographicCamera(left, right, top, bottom, near, far);
+        //camera.position.z = 1000;
+        camera.position.set(0, 0, 10);
+            
+    } else {
+        camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 5000 );
+        camera.position.z = 1000;
+    }
+
+    globalThis.camera = camera;
+    scene.add( camera );
+
+    // object needs to be illuminated to be visible 
+    var ambientLight = new THREE.AmbientLight ( 0xffffff, 1);
+    scene.add( ambientLight );
+
+    const light1 = new THREE.DirectionalLight( 0xffffff, 2.5 );
+    light1.position.set( 1, 1, 1 );
+    scene.add( light1 );
+
+    const light2 = new THREE.DirectionalLight( 0xffffff, 1.5 );
+    light2.position.set(  1, - 1, -1 );
+    scene.add( light2 );
+
+    // root contains all the objects of the scene 
+    scene.add( root );
+    root.visible = true;
+
+    // renderer makes scene visible 
+    renderer = new THREE.WebGLRenderer( { antialias: false } );
     renderer.setPixelRatio(window.devicePixelRatio);
+
+    // place the scene in the column middle window 
     renderer.setSize(containerWidth, containerHeight);
     renderer.domElement.id = 'canvas';
     container.appendChild(renderer.domElement);
-}
 
-function setUpControls() {
-
+    // allow user to move around the molecule 
     if (cameraOption == 'orthographic') {
         const clock = new THREE.Clock();
         controls = new CameraControls( camera, renderer.domElement );
 
         ( function anim () {
 
+            // snip
             const delta = clock.getDelta();
             const hasControlsUpdated = controls.update( delta );
         
@@ -240,20 +224,7 @@ function setUpControls() {
         } )();
 
 		controls.addEventListener( 'update', render ); // call this only in static scenes (i.e., if there is no animation loop)
-
-        const box = getVisibleBoundingBox();
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-
-        controls.setLookAt(
-            camera.position.x, camera.position.y, camera.position.z,  // camera position
-            center.x, center.y, center.z   // look-at target
-        );
-
-        controls.minDistance = 1; 
-        controls.maxDistance = 100;
-        controls.update();
-
+        controls.setLookAt(0, 0, 100, 0, 0, 0); // Adjust based on molecule's position
         camera.lookAt(controls.getTarget(new THREE.Vector3));
         
         const moveSpeed = 0.4;
@@ -276,56 +247,27 @@ function setUpControls() {
             }
         });
 
+		
     } else {
         controls = new TrackballControls( camera, renderer.domElement ); // TODO, controls zooming out boundaries
         controls.minDistance = 100;
         controls.maxDistance = 3000;
     }
-}
 
-init();
+    initialPosition = camera.position.clone();
+    initialQuaternion = camera.quaternion.clone();
 
-// init function - sets up scene, camera, renderer, controls, and GUIs 
-function init() {
-
-    // initialize main window 
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color( 0x000000 );
-    globalThis.scene = scene;
+    controls.getTarget(initialTarget);
     
-    container = document.getElementsByClassName('column middle')[0]; 
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-
-    // addAxes();
-
-    setUpLights();
-    setUpRenderer();
-
-    camera = new THREE.OrthographicCamera(0,0,0,0,0,0);
-
     // the default/first molecule to show up 
-
-    loadMolecule(defaultParams.mculeParams.molecule, () => {
-        setUpCamera();
-        setUpControls();
-
-        storeInitialView();
-        
-        onWindowResize();
-
-        scene.add( root );
-        root.visible = true;    
-
-        resetViewCameraWindow();
-    });
-    
+    loadMolecule( defaultParams.mculeParams.molecule, CPK, currentRep );
 
     // dynamic screen size 
-    window.addEventListener('resize', onWindowResize);
+    window.addEventListener( 'resize', onWindowResize );
     window.addEventListener('click', raycast);
     window.addEventListener('keypress', keypressD);
     window.addEventListener('keypress', keypressC);
+    window.addEventListener('keypress', keypressT);
     window.addEventListener('keypress', keypressEqual);
 
     document.addEventListener('keydown', function(event) {
@@ -354,29 +296,39 @@ function init() {
     molGUIContainer.appendChild(molMenu.domElement); 
 
     molMenu.onChange(function(molecule) {
+        //popup();
         console.log("trying to load", molecule, defaultParams.repParams.representation);
         residueSelected = 'all';
 
         currentMolecule = molecule;
 
+        console.log('currentMolecule now: ', currentMolecule);
+
         resetScene();
 
-        loadMolecule(molecule, () => { resetViewCameraWindow(); });
+        loadMolecule(molecule, defaultParams.repParams.representation, currentRep);
+        
         resetInterface();
+        //popdown();
     });
 
     createGUI();    
+
+    //TW.addSceneBoundingBoxHelper(scene);
+
+    onWindowResize();
 }
 
 function resetEverything() {
 
+    //popup();
     console.log('in resetEverything');
 
     resetScene();
     resetInterface();
     loadMolecule(currentMolecule);
 
-    onWindowResize();
+    //popdown();
 }
 
 function resetInterface() {
@@ -409,10 +361,10 @@ function resetInterface() {
 }
 
 function storeInitialView() {
-
     initialPosition.copy(camera.position);
     initialQuaternion.copy(camera.quaternion);
     
+    //initialTarget.copy(controls.getTarget);
     controls.getTarget(initialTarget);
 }
 
@@ -423,49 +375,93 @@ function resetScene() {
     }
 }
 
-/**
- * Helper function to get bounding box of objects visible on screen.
- * 
- * @param {boolean} visible - if true, draw red bounding box on screen
- * @returns {THREE.box3} bounding box
- */
-function getVisibleBoundingBox(visible) {
+function getVisibleBoundingBox() {
     let box = new THREE.Box3();
     let tempBox = new THREE.Box3();
 
     root.traverse( (obj) => {
-        if (obj.isInstancedMesh) {
-            
-            obj.computeBoundingBox();
-            tempBox.copy(obj.boundingBox).applyMatrix4(obj.matrixWorld);
+        if (obj.isMesh && obj.visible) {
+
+            obj.geometry.computeBoundingBox();
+            tempBox.copy(obj.geometry.boundingBox).applyMatrix4(obj.matrixWorld);
             box.union(tempBox);
-            
-        }
-    });
+        } 
+    })
 
     let helper = new THREE.Box3Helper(box, new THREE.Color(0xff0000)); 
-    scene.add(helper);
-
-    if (visible) {
-        helper.visible = true;
-    } else {
-        helper.visible = false;
-    }
+    scene.add(helper);  
+    helper.visible = false;
 
     return box;
 }
 
-/**
- * Helper function to add x, y, and z axes to the rendering window
- */
 function addAxes() {
     const axesHelper = new THREE.AxesHelper( 100 );
     scene.add( axesHelper );
 }
 
+function getBoundingBoxCenter() {
+
+    let boundingBox = getVisibleBoundingBox();
+    let center = new THREE.Vector3();
+    boundingBox.getCenter(center);
+    return center;
+}
+
 function recenterCamera(camera, controls) {
-    const boundingBox = getVisibleBoundingBox();
-    fitCameraToBoundingBox(camera, controls, boundingBox);
+
+    let boundingBox = getVisibleBoundingBox();
+    let center = getBoundingBoxCenter();
+    
+    let size = boundingBox.getSize(new THREE.Vector3());
+    let maxDim = Math.max(size.x, size.y, size.z);
+
+    if (camera.isPerspectiveCamera) {
+        let distanceMultiplier = 2.5; // Adjust this value to zoom out more
+        let distance = maxDim * distanceMultiplier;
+    
+        camera.position.set(
+            center.x,
+            center.y,
+            center.z + distance
+        );
+    
+        let aspect = window.innerWidth / window.innerHeight;
+        let fov = 2 * Math.atan((maxDim / 2) / distance) * (180 / Math.PI);
+        camera.fov = Math.min(Math.max(fov, 30), 75); // Clamp FOV between 30 and 75 degrees
+        camera.aspect = aspect;
+        camera.near = 0.1;
+        camera.far = maxDim * 10;
+    
+        controls.minDistance = maxDim * 0.5;
+        controls.maxDistance = maxDim * 10;
+        controls.getTarget(center);
+
+    } else {
+
+        let scaleFactor = 1.2; // Increase this value to zoom out more
+        let left = (-size.x) / 2 * scaleFactor;
+        let right = (size.x) / 2 * scaleFactor;
+        let top = size.y / 2 * scaleFactor;
+        let bottom = -size.y / 2 * scaleFactor;
+        let near = -maxDim * 5;
+        let far = maxDim * 5;
+
+        camera.left = left;
+        camera.right = right;
+        camera.top = top;
+        camera.bottom = bottom;
+        camera.near = near;
+        camera.far = far;
+
+        camera.position.set(center.x, center.y, maxDim * 2);
+        controls.setTarget(center.x, center.y, center.z);
+    }
+
+    
+    camera.updateProjectionMatrix();
+    //controls.update();
+
     storeInitialView();
 }
 
@@ -475,32 +471,19 @@ function calculateTime(startTime, endTime, message) {
     console.log(message, 'in seconds:', totalTime/1000);
 }
 
-function getKey(mesh, instanceID) {
-    return `${mesh.uuid}:${instanceID}`;
-}
 
-/**
- * Loads in PDB file.
- *
- * @param {string} model - PDB file name
- * @param {function} callback - anonymous function to be called after entire molecule is loaded in
- *                              useful for when recentering camera after molecule has loaded; if 
- *                              camera is recentered outside of callback function, molecule may not have
- *                              finished rendering fully so camera viewing window will be incorrect
- */
-function loadMolecule(model, callback) { 
+function loadMolecule(model) { 
     popup();
     let startTime = new Date();
+
+    numComplexObjs = 0;
+    numSimpleObjs = 0;
 
     //console.log("loading model", model, "representation", representation);
 
     currentMolecule = model;
 
     const url = './models/molecules/' + model;
-
-    // empty metadata arrays and maps
-    bondMetadata = [];
-    metadataMap = new Map();
 
     PDBloader.load( url, function ( pdb ) {
         // properties of pdb loader that isolate the atoms & bonds
@@ -525,6 +508,13 @@ function loadMolecule(model, callback) {
 
         residues = pdb.residues;
         chains = pdb.chains;
+         
+        let sphereGeometry, boxGeometry;
+
+        // pre-build geometries for atoms and bonds
+        let sphereGeometryCPK = new THREE.IcosahedronGeometry(1/3, detail );
+        let boxGeometryCPK = new THREE.BoxGeometry( 1/75, 1/75, 0.6 );
+        let sphereGeometryVDWCache = {};
         
         let randTime = new Date();
 
@@ -537,61 +527,17 @@ function loadMolecule(model, callback) {
         let positions = geometryAtoms.getAttribute( 'position' );
 
         const colors = geometryAtoms.getAttribute( 'color' );
-        //console.log('colors', colors);
+        console.log('colors', colors);
         const position = new THREE.Vector3();
-
-        let atomCount = positions.count * 2; // 2 because there are two drawing methods that use atoms
-        let bondCount = geometryBonds.getAttribute('position').count;
-
-        // pre-build geometries for atoms and bonds, InstancedMesh
-        // CPK and VDW atom spheres will be scaled later based on element identity
-
-        let sphereGeometry, boxGeometry;
-
-        // CPK
-        let sphereGeometryCPK = new THREE.IcosahedronGeometry(sphereScaleCPK, detail);
-        let sphereMaterialCPK = new THREE.MeshPhongMaterial();
-        atomInstancedMeshCPK = new THREE.InstancedMesh(sphereGeometryCPK, sphereMaterialCPK, atomCount);
-        atomInstancedMeshCPK.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        atomInstancedMeshCPK.molecularElement = 'atom';
-        atomInstancedMeshCPK.drawingMethod = CPK;
-        let atomIndexCPK = 0;
-
-        let boxGeometryCPK = new THREE.BoxGeometry( 0.08, 0.08, 0.6 );
-        let bondMaterialCPK = new THREE.MeshPhongMaterial({ color: 0xffffff });
-        bondInstancedMeshCPK = new THREE.InstancedMesh(boxGeometryCPK, bondMaterialCPK, bondCount);
-        bondInstancedMeshCPK.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        bondInstancedMeshCPK.molecularElement = 'bond';
-        bondInstancedMeshCPK.drawingMethod = CPK;
-        let bondIndexCPK = 0;
-
-        // VDW
-        let sphereGeometryVDW = new THREE.IcosahedronGeometry(sphereScaleVDW, detail);
-        let sphereMaterialVDW = new THREE.MeshPhongMaterial();
-        atomInstancedMeshVDW = new THREE.InstancedMesh(sphereGeometryVDW, sphereMaterialVDW, atomCount);
-        atomInstancedMeshVDW.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        atomInstancedMeshVDW.molecularElement = 'atom';
-        atomInstancedMeshVDW.drawingMethod = VDW;
-        let atomIndexVDW = 0;
-
-        // Lines
-        let boxGeometryLines = new THREE.BoxGeometry( 0.08, 0.08, 1 );
-        let bondMaterialLines = new THREE.MeshPhongMaterial();
-        bondInstancedMeshLines = new THREE.InstancedMesh(boxGeometryLines, bondMaterialLines, bondCount * 2);
-        bondInstancedMeshLines.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        bondInstancedMeshLines.molecularElement = 'atom';
-        bondInstancedMeshLines.drawingMethod = lines;
-        let bondIndexLines = 0;
         
         root.visible = true;
         let randTimeEnd = new Date();
-        //calculateTime(randTime, randTimeEnd, 'stuff before atom loading');
+        calculateTime(randTime, randTimeEnd, 'stuff before atom loading');
 
         let atomStartTime = new Date();
 
         // LOAD IN ATOMS 
         for ( let i = 0; i < positions.count; i ++ ) {
-            //console.log(i);
 
             // loop through the positions array to get every atom 
             position.x = positions.getX( i );
@@ -602,9 +548,9 @@ function loadMolecule(model, callback) {
             
             // create a set of atoms/bonds in each of the 3 styles for each tab
             for (let key of reps) {
+                //console.log('loaded atoms for style', key);
                 
                 let atomName = json_atoms.atoms[i][7];
-                let atomElement = json_atoms.atoms[i][4];
                 let residue = json_atoms.atoms[i][5];
                 let resName = json_atoms.atoms[i][8];
                 let chain = json_atoms.atoms[i][6];
@@ -615,114 +561,67 @@ function loadMolecule(model, callback) {
                 material.color = color;
 
                 if (key == VDW) {
-                    const radius = getRadius(atomElement);
-                    sphereGeometry = sphereGeometryVDW;
-
-                    let dummy = new THREE.Object3D();
-                    dummy.position.copy(position);
-                    dummy.scale.set(radius, radius, radius);
-                    dummy.updateMatrix();
-                    atomInstancedMeshVDW.setMatrixAt(atomIndexVDW, dummy.matrix);
-                    atomInstancedMeshVDW.setColorAt(atomIndexVDW, color);
-                    //console.log("instanced ID", atomInstancedMeshCPK.instanceId);
                     
-                    const transformedPosition = new THREE.Vector3();
-                    dummy.matrix.decompose(transformedPosition, new THREE.Quaternion(), new THREE.Vector3());
-
-                    let metadata = {
-                        molecularElement: "atom",
-                        drawingMethod: key,
-                        repID: currentRep,
-                        residue: residue,
-                        chain: chain,
-                        atomName: atomName,
-                        atomElement: atomElement,
-                        resName: resName,
-                        printableString: resName + residue.toString() + ':' + atomName.toUpperCase(),
-                        atomInfoSprite: null,
-                        distanceLine: null,
-                        colorUpdated: false,
-                        originalColor: new THREE.Color().setRGB(colors.getX( i ), colors.getY( i ), colors.getZ( i )),
-                        instanceID: atomIndexVDW,
-                        instancedMesh: atomInstancedMeshVDW,
-                        wireframe: null,
-                        position: transformedPosition.clone(),
-                        scale: new THREE.Vector3(radius, radius, radius),
-                        quaternion: new THREE.Quaternion(),
-                        visible: false
-                    };
-
-                    // push metadata into map for easy access
-                    let atomKey = getKey(atomInstancedMeshVDW, atomIndexVDW);
-                    metadataMap.set(atomKey, metadata);
-
-                    atomIndexVDW++;
+                    // if element doesn't yet exist in VDW cache, create a new geometry and add it
+                    if (!(atomName in sphereGeometryVDWCache)) {
+                        let rad = getRadius(json_atoms.atoms[i][4]) * 0.7; 
                     
+                        sphereGeometry = new THREE.IcosahedronGeometry(rad, detail);
+                        sphereGeometryVDWCache[atomName] = sphereGeometry;
+                                                
+                    } else {
+                        sphereGeometry = sphereGeometryVDWCache[atomName];
+                    }
+
                 } else if (key == CPK) {
-                    const radius = getRadius(atomElement);
                     sphereGeometry = sphereGeometryCPK;
 
-                    let dummy = new THREE.Object3D();
-                    dummy.position.copy(position);
-                    dummy.scale.set(radius, radius, radius);
-                    dummy.updateMatrix();
-                    atomInstancedMeshCPK.setMatrixAt(atomIndexCPK, dummy.matrix);
-                    atomInstancedMeshCPK.setColorAt(atomIndexCPK, color);
-
-                    const transformedPosition = new THREE.Vector3();
-                    dummy.matrix.decompose(transformedPosition, new THREE.Quaternion(), new THREE.Vector3());
-
-                    let metadata = {
-                        molecularElement: "atom",
-                        drawingMethod: key,
-                        repID: currentRep,
-                        residue: residue,
-                        chain: chain,
-                        atomName: atomName,
-                        atomElement: atomElement,
-                        resName: resName,
-                        printableString: resName + residue.toString() + ':' + atomName.toUpperCase(),
-                        atomInfoSprite: null,
-                        distanceLine: null,
-                        colorUpdated: false,
-                        originalColor: new THREE.Color().setRGB(colors.getX( i ), colors.getY( i ), colors.getZ( i )),
-                        instanceID: atomIndexCPK,
-                        instancedMesh: atomInstancedMeshCPK,
-                        wireframe: null,
-                        position: transformedPosition.clone(),
-                        scale: new THREE.Vector3(radius, radius, radius),
-                        quaternion: new THREE.Quaternion(),
-                        visible: true
-                    };
-
-                    // push metadata into map for easy access
-                    let atomKey = getKey(atomInstancedMeshCPK, atomIndexCPK);
-                    metadataMap.set(atomKey, metadata);
-
-                    atomIndexCPK++;
+                } else if (key == lines) { // skip loading lines
+                    continue;
                 }
-                // skip atoms for lines drawing method
+    
+                // create atom object that is a sphere with the position, color, and content we want 
+                const object = new THREE.Mesh( sphereGeometry, material );
+                numComplexObjs += 1;
+
+                object.receiveShadow = false;
+                object.castShadow = false;
+
+                object.position.copy( position );
+    
+                object.molecularElement = "atom";
+                object.drawingMethod = key;
+                object.repID = currentRep;
+                object.residue = residue;
+                object.chain = chain;
+                object.atomName = atomName; // json_atoms.atoms[i][7]
+                object.resName = resName;
+                object.printableString = resName + residue.toString() + ':' + atomName.toUpperCase();
+                object.atomInfoSprite = null;
+                object.colorUpdated = false;
+
+                object.originalColor = new THREE.Color().setRGB(colors.getX( i ), colors.getY( i ), colors.getZ( i ));
+
+                object.material.color.set(color);
+                
+                // reference to original pdb within object for raycaster 
+                object.atomValue = i; 
+    
+                // add atom object to scene 
+                root.add( object );
+
+                if (key == CPK) {
+                    object.visible = true;
+                } else {
+                    object.visible = false;
+                }
             } 
         }
-
-        atomInstancedMeshCPK.count = atomIndexCPK;
-        atomInstancedMeshCPK.instanceMatrix.needsUpdate = true;
-        atomInstancedMeshCPK.instanceColor.needsUpdate = true;
-        root.add(atomInstancedMeshCPK);
-
-        atomInstancedMeshVDW.count = atomIndexVDW;
-        atomInstancedMeshVDW.instanceMatrix.needsUpdate = true;
-        atomInstancedMeshVDW.instanceColor.needsUpdate = true;
-        root.add(atomInstancedMeshVDW);
-
-        // hide VDW instances when first loading molecule
-        atomInstancedMeshVDW.visible = false;
 
         let atomEndTime = new Date();
         calculateTime(atomStartTime, atomEndTime, 'time to load atoms');
 
-
-        // LOAD IN BONDS
+        // LOAD BONDS
         let bondStartTime = new Date();
         positions = geometryBonds.getAttribute( 'position' );
         const start = new THREE.Vector3();
@@ -738,201 +637,118 @@ function loadMolecule(model, callback) {
             let color2 = atom2[3];
 
             // convert color arrays into HTML strings that can be fed into a new THREE.color
-            color1 = new THREE.Color(`rgb(${color1[0]}, ${color1[1]}, ${color1[2]})`);
-            color2 = new THREE.Color(`rgb(${color2[0]}, ${color2[1]}, ${color2[2]})`);
+            color1 = `rgb(${color1[0]}, ${color1[1]}, ${color1[2]})`;
+            color2 = `rgb(${color2[0]}, ${color2[1]}, ${color2[2]})`;
 
             // get bond start & end locations 
             start.set(positions.getX(i), positions.getY(i), positions.getZ(i));
             end.set(positions.getX(i + 1), positions.getY(i + 1), positions.getZ(i + 1));
 
-            let bondVector = new THREE.Vector3().subVectors(end, start); // Direction from start to end
-            let bondLength = bondVector.length(); // Get the bond length
-            let mid = new THREE.Vector3().lerpVectors(start, end, 0.5); // Midpoint for positioning
-
-            let quaternion = new THREE.Quaternion();
-            let upVector = new THREE.Vector3(0, 0, 1); // Bonds are initially aligned along z-axis
-            quaternion.setFromUnitVectors(upVector, bondVector.clone().normalize()); // Align bond to direction
-
             for (let key of reps) {
 
-                if (key == CPK) { // TODO could potentially move this/combine with loading in atoms? some redundant information taken from atom1 and atom2 and put in metadata, since lines are technically atoms and not bonds
+                if (key == CPK) {
+                    boxGeometry = boxGeometryCPK;
 
-                    const instanceID = i/2;
-                    let matrix = new THREE.Matrix4();
-                    const scale = new THREE.Vector3(1, 1, bondLength); 
-                    
-                    matrix.compose(mid, quaternion, scale); 
-                    bondInstancedMeshCPK.setMatrixAt(bondIndexCPK, matrix);
-                    bondIndexCPK++;
+                    const bondMaterial = new THREE.MeshPhongMaterial( { color: 0xffffff } );
+    
+                    // make bond a rectangular prism & add it to scene 
+                    const object = new THREE.Mesh( boxGeometry, bondMaterial );
+                    object.position.copy( start );
+                    object.position.lerp( end, 0.5 );
+                    object.scale.set( 5, 5, start.distanceTo( end ) );
 
-                    let metadata = {
-                            molecularElement: "bond",
-                            drawingMethod: key,
-                            atom1: atom1,
-                            atom2: atom2,
-                            originalColor: 'rgb(255, 255, 255)',
-                            colorUpdated: false,
-                            instanceID: instanceID,
-                            instancedMesh: bondInstancedMeshCPK,
-                            position: mid,
-                            scale: scale.clone(),
-                            quaternion: quaternion.clone(),
-                            visible: true
-                    };
-                    
-                    // push metadata into map 
-                    let bondKey = getKey(bondInstancedMeshCPK, i, 0);
-                    metadataMap.set(bondKey, metadata);
-                    CPKbonds++;
-                    
-                } else if (key == lines) { // TODO could make CPK bonds use lines instancedMesh
+                    object.molecularElement = "bond";
+                    object.drawingMethod = key;
+                    object.atom1 = atom1;
+                    object.atom2 = atom2;
+                    object.originalColor = 'rgb(255, 255, 255)';
+                    object.colorUpdated = false;
 
+                    object.lookAt(end);
+                    object.visible = true;
+                    root.add(object);
+
+                    numSimpleObjs += 1;
+                    
+                } else if (key == lines) {
+
+                    let bondThickness = 0.1;
                     const bondLength = start.distanceTo(end);
                     const halfBondLength = bondLength / 2;
 
+                    boxGeometry = new THREE.BoxGeometry(bondThickness, bondThickness, halfBondLength);  
+                    //console.log('colors', color1, color2);
+
+                    const material1 = new THREE.MeshBasicMaterial({ color: color1 });
+                    const material2 = new THREE.MeshBasicMaterial({ color: color2 });
+
+                    const bondHalf1 = new THREE.Mesh(boxGeometry, material1);
+                    const bondHalf2 = new THREE.Mesh(boxGeometry, material2);
+                    
                     const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
                     const bondDirection = new THREE.Vector3().subVectors(start, end).normalize();
+
                     const offset = bondDirection.clone().multiplyScalar(halfBondLength / 2);
 
-                    const scale = new THREE.Vector3(1, 1, halfBondLength);
+                    bondHalf1.position.copy(midpoint).add(offset);
+                    bondHalf2.position.copy(midpoint).sub(offset);
 
-                    // first half of bond/atom
-                    const instanceID1 = bondIndexLines;
-                    const pos1 = new THREE.Vector3().copy(midpoint).add(offset);
+                    bondHalf1.lookAt(end);
                     
-                    const matrix1 = new THREE.Matrix4().compose(pos1, quaternion, scale);
-                    bondInstancedMeshLines.setMatrixAt(bondIndexLines, matrix1);
-                    bondInstancedMeshLines.setColorAt(bondIndexLines, color1);
-                    bondIndexLines++;
+                    bondHalf2.lookAt(start);
 
-                    let atomName1 = atom1[7];
-                    let atomElement1 = atom1[4];
-                    let residue1 = atom1[5];
-                    let resName1 = atom1[8];
-                    let chain1 = atom1[6]; 
+                    bondHalf1.molecularElement = "bond";
+                    bondHalf1.drawingMethod = key;
+                    bondHalf1.atom1 = atom1;
+                    bondHalf1.atom2 = atom2;
+                    bondHalf1.originalColor = color1;
+                    bondHalf1.colorUpdated = false;
 
-                    // second half of bond/atom
-                    const instanceID2 = bondIndexLines;
-                    const pos2 = new THREE.Vector3().copy(midpoint).sub(offset);
-                    
-                    const matrix2 = new THREE.Matrix4().compose(pos2, quaternion, scale);
-                    bondInstancedMeshLines.setMatrixAt(bondIndexLines, matrix2);
-                    bondInstancedMeshLines.setColorAt(bondIndexLines, color2);
-                    bondIndexLines++;
+                    bondHalf2.molecularElement = "bond";
+                    bondHalf2.drawingMethod = key;
+                    bondHalf2.atom1 = atom1;
+                    bondHalf2.atom2 = atom2;
+                    bondHalf2.originalColor = color2;
+                    bondHalf2.colorUpdated = false;
 
-                    let atomName2 = atom2[7];
-                    let atomElement2 = atom2[4];
-                    let residue2 = atom2[5];
-                    let resName2 = atom2[8];
-                    let chain2 = atom2[6];
+                    /*  console.log('bondhalf1', bondHalf1);
+                    console.log('bondHalf2', bondHalf2); */
+                    bondHalf1.visible = false;
+                    bondHalf2.visible = false;
 
-                    // add metadata to array
-                    let metadata1 = {
-                            molecularElement: "atom",
-                            drawingMethod: key,
-                            atom1: atom1,
-                            atom2: atom2,
-                            atomName: atomName1,
-                            atomElement: atomElement1,
-                            residue: residue1, 
-                            resName: resName1, 
-                            chain: chain1,
-                            printableString: resName1 + residue1.toString() + ':' + atomName1.toUpperCase(),
-                            atomInfoSprite: null,
-                            distanceLine: null,
-                            originalColor: color1,
-                            colorUpdated: false,
-                            instanceID: instanceID1,
-                            instancedMesh: bondInstancedMeshLines,
-                            position: pos1,
-                            atomPosition: start.clone(),
-                            scale: scale.clone(),
-                            quaternion: quaternion.clone(),
-                            bondLength: bondLength,
-                            bondDirection: bondDirection,
-                            wireframe: false,
-                            visible: false
-                    };
-                    
-                    let metadata2 = {
-                            molecularElement: "atom",
-                            drawingMethod: key,
-                            atom1: atom1,
-                            atom2: atom2,
-                            atomName: atomName2,
-                            atomElement: atomElement2,
-                            residue: residue2, 
-                            resName: resName2, 
-                            chain: chain2,
-                            printableString: resName2 + residue2.toString() + ':' + atomName2.toUpperCase(),
-                            atomInfoSprite: null,
-                            distanceLine: null,
-                            originalColor: color2,
-                            colorUpdated: false,
-                            instanceID: instanceID2,
-                            instancedMesh: bondInstancedMeshLines,
-                            position: pos2,
-                            atomPosition: end.clone(),
-                            scale: scale.clone(),
-                            quaternion: quaternion.clone(),
-                            bondLength: bondLength,
-                            bondDirection: bondDirection,
-                            wireframe: false,
-                            visible: false
-                    };
+                    root.add(bondHalf1);
+                    root.add(bondHalf2);
 
-                    const tempMatrix = new THREE.Matrix4();
-                    metadata1.instancedMesh.getMatrixAt(metadata1.instanceID, tempMatrix);
-                    
-                    const tempMatrix2 = new THREE.Matrix4();
-                    metadata2.instancedMesh.getMatrixAt(metadata2.instanceID, tempMatrix2);
-                   
-                    // push metadata into map 
-                    let bondKey1 = getKey(bondInstancedMeshLines, instanceID1);
-                    metadataMap.set(bondKey1, metadata1);
+                    numSimpleObjs += 2;
 
-                    let bondKey2 = getKey(bondInstancedMeshLines, instanceID2);
-                    metadataMap.set(bondKey2, metadata2);
-                
-                    linesBonds ++;
-
-                } else if (key == VDW) { // skip bonds for VDW
+                } else if (key == VDW) { // skip VDW, no bonds
                     continue;
-                }
+                }  
             }
         }
-
-        bondInstancedMeshCPK.count = bondIndexCPK;
-        bondInstancedMeshCPK.instanceMatrix.needsUpdate = true;
-        root.add(bondInstancedMeshCPK);
-
-        bondInstancedMeshLines.count = bondIndexLines;
-        bondInstancedMeshLines.instanceMatrix.needsUpdate = true;
-        root.add(bondInstancedMeshLines);
-
-        //console.log("CPKbonds", CPKbonds, "linesBonds", linesBonds);
-
-        // make lines drawing method invisible when first loading molecule
-        bondInstancedMeshLines.visible = false;
 
         let bondEndTime = new Date();
         calculateTime(bondStartTime, bondEndTime, 'time to load bonds');
     
-        // push all instancedMeshes to array
-        instancedMeshArray.push(atomInstancedMeshCPK, atomInstancedMeshVDW, bondInstancedMeshCPK, bondInstancedMeshLines);
-
         // render the scene after adding all the new atom & bond objects   
+        storeInitialView();
+
+        console.log('render');         
         render();
 
-        getVisibleBoundingBox();
+        resetViewCameraWindow();
 
         let endTime = new Date();
         calculateTime(startTime, endTime, 'time to loadMolecule');
 
-        if (callback) callback();
+        console.log('numComplexObjs', numComplexObjs);
+        console.log('numSimpleObjs', numSimpleObjs);
 
         popdown();
+
     } );
+
+    
 }
 
 function hideText(repNum) {
@@ -958,6 +774,7 @@ function deleteText(repNum) {
     let objectsToRemove = [];
 
     root.traverse( (obj) => {
+
         if (obj.repNum == repNum) {
 
             if (obj.isSprite) {
@@ -976,10 +793,10 @@ function deleteText(repNum) {
     objectsToRemove.forEach(obj => root.remove(obj));
 }
 
-// returns true if variable is string, false otherwise
 function isString(variable) {
     return typeof variable === "string";
 }
+
 
 function findDistanceTarget(selectionValue) {
 
@@ -995,45 +812,49 @@ function findDistanceTarget(selectionValue) {
     let type = selectionValue[1];
     let selected = selectionValue[2];
 
-    //console.log('distance', distance, "type", type, "selected", selected);
+    console.log('distance', distance, "type", type, "selected", selected);
     
     // find all target molecule atoms
     if (type == residue) {
 
-        for (const [_, obj] of metadataMap) {
-            if (obj.drawingMethod == CPK && obj.residue == selected) {
-                // select by obj.drawingMethod == CPK because we just need one set of target atoms to compare distances with
+        root.traverse( (obj) => { // select by obj.drawingMethod == CPK because we just need one set of target atoms to compare distances with
+            if (obj.isMesh && obj.drawingMethod == CPK && obj.residue == selected) {
+                console.log('found a target');
                 target.push([obj.position.x, obj.position.y, obj.position.z]);
             }
-        }
+        })
 
     } else if (type == 'molecule') {
+        //console.log(currentRep, currentStyle, selected);
 
-        for (const [_, obj] of metadataMap) {
-            if (obj.drawingMethod == CPK && obj.chain == selected) {
+        root.traverse( (obj) => {
+            if (obj.isMesh && obj.drawingMethod == CPK && obj.chain == selected) {
+                //console.log("found a target obj", obj);
                 target.push([obj.position.x, obj.position.y, obj.position.z]);
             }
-        }
+        })
     }
     
-    //console.log('target in findDistanceTarget', target);
+    console.log('target in findDistanceTarget', target);
 
     // find all residues within the required distance to the target atoms
 
-    for (const [_, obj] of metadataMap) {
+    root.traverse( (obj) => {
+        if (obj.isMesh) {
+            // check only the atoms that are the relevant rep and style
+            if (obj.molecularElement == 'atom' && obj.drawingMethod == CPK) { // just use CPK as target
+                for (let coord of target) {
 
-        // check only the atoms that are the relevant rep and drawing method
-        if (obj.molecularElement == 'atom' && obj.drawingMethod == CPK) { // just use CPK as target
-            for (let coord of target) {
-
-                let dist = calculateDistanceXYZ(coord, [obj.position.x, obj.position.y, obj.position.z]);
-
-                if (dist <= distance) {
-                    validResidues[obj.residue] = true;
-                } 
+                    let dist = calculateDistanceXYZ(coord, [obj.position.x, obj.position.y, obj.position.z]);
+    
+                    if (dist <= distance) {
+                        validResidues[obj.residue] = true;
+                        //console.log('found valid residue', obj.residue);
+                    } 
+                }
             }
         }
-    }
+    });
     
     return validResidues;
 }
@@ -1055,7 +876,11 @@ function isSelected(obj, selectionMethod, selectionValue, validResidues) {
 
             } else if (selectionMethod == residue) {
 
-                if (obj.residue == selectionValue) { return true; }
+                //console.log('showMolecule, selecting by residue in atom');
+
+                if (obj.residue == selectionValue) {
+                    return true;
+                }
 
             } else if (selectionMethod == 'chain') {  
                 //console.log('showMolecule, selecting by chain in atom');
@@ -1186,42 +1011,16 @@ function isSelected(obj, selectionMethod, selectionValue, validResidues) {
     }
 }
 
-/**
- * 
- */
 function parseRepInfo() {
 
+    console.log('in parseRepInfo');
     popup();
 
-    // mark all objs as not visible
-    for (const [_, obj] of metadataMap) {
-        obj.visible = false;
-        const matrix = new THREE.Matrix4();
-        const quaternion = new THREE.Quaternion();
-        const position = obj.position;
-
-        matrix.compose(position, quaternion, zeroScale);
-        obj.instancedMesh.setMatrixAt(obj.instanceID, matrix);
-    
-        // hide all wireframes
-        if (obj.wireframe) {
-            obj.wireframe.visible = false;
+    // mark all objects as not visible
+    scene.traverse((obj) => {
+        if (obj.isMesh) {
+            obj.visible = false;
         }
-
-        // hide all lines and labels
-        if (obj.distanceLine) {
-            obj.distanceLine.visible = false;
-        } 
-
-        // hide all labels
-        if (obj.atomInfoSprite) {
-            obj.atomInfoSprite.visible = false;
-        }
-    }
-
-    // update all instancedMeshes
-    instancedMeshArray.forEach( mesh => {
-        mesh.instanceMatrix.needsUpdate = true;
     });
 
     // loop backwards through repsData array to get reps from newest to oldest
@@ -1234,96 +1033,66 @@ function parseRepInfo() {
         let selectionMethod = rep.selectionMethod;
         let selectionValue = rep.selectionValue;
         let state = rep.state;
+        console.log('rep', rep);
 
         let validResidues;
 
         if (selectionMethod == 'distance') {
             validResidues = findDistanceTarget(selectionValue);
+            console.log('validResidues', validResidues);
         }
 
         if (state != shown) {
+            console.log(repID, 'is hidden');
             continue;
         }
 
         console.log('rep', repID, 'drawing method', drawingMethod);
+        /* console.log('drawing method', drawingMethod);
+        console.log('selectionMethod', selectionMethod);
+        console.log('selectionValue', selectionValue); */
 
-        for (const [_, obj] of metadataMap) {
-            //console.log(key, obj);
+        scene.traverse( (obj) => {
+            /* if (obj.isMesh && obj.drawingMethod == drawingMethod) {
+                console.log('this is a', drawingMethod, 'object!');
+            } */
 
-            if (obj.drawingMethod == drawingMethod && !obj.colorUpdated) { // if obj is atom or bond and color hasn't been updated yet
-                
+            if (obj.isMesh && obj.drawingMethod == drawingMethod && !obj.colorUpdated) { // if obj is atom or bond and color hasn't been updated yet
                 if (isSelected(obj, selectionMethod, selectionValue, validResidues)) {
                     
-                    // scale obj to be visible
-                    const matrix = new THREE.Matrix4();
-                    const quaternion = obj.quaternion;
-                    const position = obj.position;
-                    const scale = obj.scale;
-
-                    matrix.compose(position, quaternion, scale);
-                    obj.instancedMesh.setMatrixAt(obj.instanceID, matrix);
-
-                    obj.visible = true;
+                    obj.visible = true; 
                     obj.colorUpdated = true; 
                     obj.repID = currentRep;
                     setColor(obj, coloringMethod);
 
-                    obj.instancedMesh.instanceMatrix.needsUpdate = true;
-
-                    const tempMatrix = new THREE.Matrix4();
-                    obj.instancedMesh.getMatrixAt(obj.instanceID, tempMatrix);
-
-                    // make wireframe visible, if any
-                    if (obj.wireframe) {
-                        obj.wireframe.visible = true;
-                    }
-
-                    // make lines and labels visible, if any
-                    if (obj.distanceLine) {
-                        obj.distanceLine.visible = true;
-                    } 
-
-                    // make label visible, if any
-                    if (obj.atomInfoSprite) {
-                        obj.atomInfoSprite.visible = true;
-                    }
+                    //console.log('obj.colorUpdated', obj.colorUpdated, 'setting color to', coloringMethod);
+                    //console.log('isSelected was true', obj);
                 } 
             }
-        }
+        });
     } 
 
-    // update all instancedMeshes
-    instancedMeshArray.forEach( mesh => {
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.visible = true; 
+    // reset all colorUpdated to false
+    scene.traverse( (obj) => {
+        if (obj.isMesh) { // if obj is atom or bond
+            obj.colorUpdated = false; 
+        }
     });
 
-    // reset all colorUpdated to false
-    for (const [_, obj] of metadataMap) {
-        obj.colorUpdated = false; 
-    }
-    
     popdown();
 }
 
 
 function setColor(obj, colorValue) {
 
-    let color;
-
-    if (colorValue === blue) {                        
-        color = new THREE.Color('rgb(0, 0, 255)'); 
-    } else if (colorValue === green) {
-        color = new THREE.Color('rgb(0, 255, 0)'); 
-    } else if (colorValue === red) {
-        color = new THREE.Color('rgb(255, 0, 0)'); 
-    } else if (colorValue === name) {
-        color = new THREE.Color(obj.originalColor); 
-    }
-
-    if (color) {
-        obj.instancedMesh.setColorAt(obj.instanceID, color);
-        obj.instancedMesh.instanceColor.needsUpdate = true;
+    if (colorValue == blue) {                        
+        obj.material.color.set(new THREE.Color('rgb(0, 0, 255)')); 
+    } else if (colorValue == green) {
+        obj.material.color.set(new THREE.Color('rgb(0, 255, 0)')); 
+    } else if (colorValue == red) {
+        obj.material.color.set(new THREE.Color('rgb(255, 0, 0)')); 
+    } else if (colorValue == name) {
+        obj.material.color.set(new THREE.Color(obj.originalColor));
     }
 }
 
@@ -1393,6 +1162,9 @@ function showCurrentRep(repID) {
     let repTabId = makeRepTabId(repID);
     let repContentId = makeRepContentId(repID);
 
+    console.log(repID, repIndex);
+    console.log("repsData[repIndex]", repsData[repIndex]);
+    
     if (repsData[repIndex].state != hidden) {
         repsData[repIndex].state = shown;
         hideShowButton.textContent = 'hide rep';
@@ -1401,6 +1173,8 @@ function showCurrentRep(repID) {
     }
         
     // add class 'active' to tab HTML element
+    console.log('repTabId', repTabId);
+    console.log('object', document.getElementById(repTabId));
     document.getElementById(repTabId).classList.add('active');
     document.getElementById(repTabId).style.display = 'block';
         
@@ -1581,7 +1355,7 @@ function openSelectionMethodTab(event, SMtype) {
 // function to create tab buttons for selection methods
 function createSelectionMethodTabButton(buttonText, active) {
 
-    //console.log('currentRep', currentRep);
+    console.log('currentRep', currentRep);
 
     const tabButton = document.createElement('button');
     tabButton.classList.add('tab-link-selection-method');
@@ -1620,8 +1394,9 @@ function generateTabID() {
 }
 
 function addRepToRepsData(tabID) {
-    repsData.push({ ...repDataDefault });  // clone default tab settings and add to repsData array
-    repsData[repsData.length - 1].id = tabID; // set new rep ID
+    repsData.push({ ...repDataDefault });  // Clone default tab settings and add to repsData array
+    repsData[repsData.length - 1].id = tabID; // Set new rep ID
+    console.log('added', tabID, 'to repsData now:', repsData);
 }
 
 function createGUI() {
@@ -1647,6 +1422,7 @@ function createGUI() {
     const moleculeGUIdiv = document.createElement('div');
     moleculeGUIdiv.classList.add('gui-div', 'tab-content-rep');
     const repContentId = makeRepContentId(currentRepID);
+    console.log('repContentId', repContentId);
     moleculeGUIdiv.id = repContentId;
 
     // create new GUI
@@ -1908,6 +1684,7 @@ function createGUI() {
     withinDropdown.onFinishChange(withinAsResidue);
     withinResMenu.onFinishChange(withinAsResidue);
 
+
     styleMenu.onChange(function(value) {
         console.log('styleMenu changing to', value, 'with currentRep', currentRep);
         let currentRepIndex = findRepIndex(currentRep);
@@ -1984,27 +1761,39 @@ function createGUI() {
 
 
 function onWindowResize() {
-    const w = container.clientWidth;
-    const h = container.clientHeight;
+    //console.log('in onWindowResize()');
 
-    if (camera.isPerspectiveCamera) {
-        camera.aspect = w / h;
-    } else if (camera.isOrthographicCamera) {
-        const currentHeight = camera.top - camera.bottom;
-        const newWidth = currentHeight * (w / h);
-        const centerX = (camera.left + camera.right) / 2;
+    let w = container.clientWidth;
+    let h = container.clientHeight;
+    //console.log('w', w, 'h', h);
+
+    let aspectRatio = w / h;
+    let center = getBoundingBoxCenter();
+
+    // Adjust the camera's aspect ratio
+    if (camera.isOrthographicCamera) {
+
+        // For orthographic camera
+        let currentHeight = camera.top - camera.bottom;
+        let newWidth = currentHeight * aspectRatio;
+        let centerX = (camera.left + camera.right) / 2;
 
         camera.left = centerX - newWidth / 2;
         camera.right = centerX + newWidth / 2;
+
+    } else if (camera.isPerspectiveCamera) {
+
+        // For perspective camera
+        camera.aspect = aspectRatio;
     }
 
     camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
-
-    // keep camera centered on bounding box
-    const center = getVisibleBoundingBox().getCenter(new THREE.Vector3());
     controls.setTarget(center.x, center.y, center.z);
+    //controls.update();
 
+    // Update renderer size
+    renderer.setSize(w, h);
+    
     render();
 }
 
@@ -2025,6 +1814,7 @@ function animate() {
         
         frames = 0;
         prevTime = time;
+        
         }
 
         //controls.update();
@@ -2080,6 +1870,20 @@ function keypressC(event) {
     }
 }
 
+// on keypress 't'
+function keypressT(event) {
+    if (event.key === 't') {
+        if (!isTranslateMode) {
+            resetMouseModes();
+            isTranslateMode = true;
+            console.log("Translate mode activated");
+        } else {
+            isTranslateMode = false;
+            console.log("Translate mode deactivated");
+        }
+    }
+}
+
 // on keypress '='
 
 function resetViewCameraWindow() {
@@ -2094,62 +1898,6 @@ function keypressEqual(event) {
     }
 }
 
-function fitCameraToBoundingBox(camera, controls, boundingBox, padding = 1.2) {
-    const center = boundingBox.getCenter(new THREE.Vector3());
-    const size = boundingBox.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-
-    if (camera.isPerspectiveCamera) {
-        const distance = maxDim * 2.5;
-
-        camera.position.set(center.x, center.y, center.z + distance);
-        const aspect = container.clientWidth / container.clientHeight;
-        const fov = 2 * Math.atan((maxDim / 2) / distance) * (180 / Math.PI);
-
-        camera.fov = THREE.MathUtils.clamp(fov, 30, 75);
-        camera.aspect = aspect;
-        camera.near = 0.1;
-        camera.far = maxDim * 10;
-
-        controls.minDistance = maxDim * 0.5;
-        controls.maxDistance = maxDim * 10;
-        controls.setTarget(center.x, center.y, center.z);
-        controls.update();
-
-    } else if (camera.isOrthographicCamera) {
-        
-        let aspectRatio = window.innerWidth / window.innerHeight;
-
-        let paddingFactor = 1.1;
-        let viewSize = Math.max(size.x, size.y, size.z) * paddingFactor;
-
-        let left = -aspectRatio * viewSize / 2;
-        let right = aspectRatio * viewSize / 2;
-        let top = viewSize / 2;
-        let bottom = -viewSize / 2;
-        let near = 0.01;   
-        let far = 10000;   
-
-        // Create the orthographic camera
-        camera.left = left;
-        camera.right = right;
-        camera.top = top;
-        camera.bottom = bottom;
-        camera.near = near;
-        camera.far = far;
-
-        camera.position.set(center.x, center.y, center.z + maxDim * 2);
-
-        controls.setLookAt(
-            camera.position.x, camera.position.y, camera.position.z,  // camera position
-            center.x, center.y, center.z   // look-at target
-        );
-
-        controls.update();
-    }
-
-    camera.updateProjectionMatrix();
-}
 
 function resetToInitialView() {
 
@@ -2170,7 +1918,6 @@ const clearButton = document.getElementById("clear-bonds");
 
 clearButton.addEventListener("click", deleteBondDistances)
 
-
 // help menu
 
 const helpButton = document.getElementById('help-button');
@@ -2184,17 +1931,10 @@ helpButton.addEventListener('click', () => {
   }
 });
 
-// If help menu is open, clicking anywhere else on the screen will close it
-document.addEventListener('click', (event) => {
-    if (!helpMenu.contains(event.target) && event.target !== helpButton) {
-      helpMenu.style.display = 'none';
-    }
-});
-
 
 // functions to manipulate atom states
 
-function resetAtomState(atom) { // TODO FIGURE OUT HOW TO CHANGE ATOM COLOR
+function resetAtomState(atom) {
 
     // resets atom state to default non-wire frame and color
     if (atom == null) {
@@ -2219,88 +1959,28 @@ function resetAtomState(atom) { // TODO FIGURE OUT HOW TO CHANGE ATOM COLOR
     return;
 };
 
-function removeWireFrame(atom) {
-
-    if (atom.wireframe) {
-        let wireframeSphere = atom.wireframe;
-        wireframeSphere.geometry.dispose();
-        wireframeSphere.material.dispose();
-        root.remove(wireframeSphere);
-
-        atom.wireframe = null;
+function switchAtomState(atom) {
+    // switches atom state from previous state
+    if (atom.material.wireframe) {
+        atom.material.wireframe = false;
         atomContent.innerHTML = '<p> selected atom: <br>none </p>'; 
-    }
-}
-
-/**
- * 
- * @param {object} atom - atom metadata object
- */
-// If atom has wireframe, remove wireframe. If atom doesn't have wireframe, add wireframe.
-function switchAtomState(atom) { 
-
-    console.log('ATOM', atom);
-    if (atom.wireframe) {
-
-        removeWireFrame(atom);
-
-    } else {  
-        
-        if (atom.drawingMethod == lines) {
-            console.log('trying to switch state of a lines atom');
-
-            const position = atom.position;
-            const scale = atom.scale;
-            const quaternion = atom.quaternion;
-
-            const wireframeGeometry = new THREE.BoxGeometry(0.08, 0.08, 1); 
-            const wireframeMaterial = new THREE.MeshBasicMaterial({
-                color: '#39FF14',     
-                wireframe: true,
-                transparent: true,
-                opacity: 0.8,
-            });
-
-            const wireframeBox = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-
-            wireframeBox.position.copy(position);
-            wireframeBox.scale.copy(scale);
-            wireframeBox.quaternion.copy(quaternion);
-
-            atom.wireframe = wireframeBox;
-            root.add(wireframeBox);
-
-        } else { // drawing method is ball-and-stick or space filling
-            console.log('trying to switch state of a sphere atom');
-
-            const radius = getRadius(atom.atomElement);
-            const color = atom.originalColor;
-
-            const position = atom.position;
-            const scale = atom.scale;
-
-            const sphereScale = atom.drawingMethod == CPK ? sphereScaleCPK : sphereScaleVDW;
-
-            const wireframeGeometry = new THREE.IcosahedronGeometry(sphereScale, detail); 
-            const wireframeMaterial = new THREE.MeshBasicMaterial({
-                color: '#39FF14',     
-                wireframe: true,
-                transparent: true,
-                opacity: 0.8,
-            });
-
-            const wireframeSphere = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-
-            wireframeSphere.position.copy(position);
-            wireframeSphere.scale.copy(scale);
-
-            atom.wireframe = wireframeSphere;
-            root.add(wireframeSphere);
-        }
-
+    } else {    
+        atom.material.wireframe = true;
         atomContent.innerHTML = '<p> selected atom: <br>' + atom.printableString + '<\p>';   
-    }
-}
+    };
+};
+
+function calculateDistance(object1, object2) { // could combine with drawLine
+    let x1 = object1.position.x;
+    let y1 = object1.position.y;
+    let z1 = object1.position.z;
+    let x2 = object2.position.x;
+    let y2 = object2.position.y;
+    let z2 = object2.position.z;
+
+    let distance = ((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)**(1/2);
+    return distance.toFixed(4);
+};
 
 function calculateDistanceXYZ(ls1, ls2) {
     let x1 = ls1[0];
@@ -2327,31 +2007,19 @@ function findExistingLine(atom1, atom2) {
 
 // draw printableString next to atom
 function drawAtomStr(atom) {
-
-    // if info str already drawn, skip (for cases where distance is measured between an atom and itself)
-    if (atom.atomInfoSprite) { return; }
     
     let x = atom.position.x;
     let y = atom.position.y;
-    let z = atom.position.z;  
-        
-    let instancedMesh;
-
-    if (atom.drawingMethod == CPK) { 
-        instancedMesh = atomInstancedMeshCPK;
-    } else if (atom.drawingMethod == VDW) { 
-        instancedMesh = atomInstancedMeshVDW;
-    } else if (atom.drawingMethod == lines) { 
-        instancedMesh = bondInstancedMeshLines;
-    } else { 
-        console.log('Error, atom not VDW or CPK'); 
-    }
+    let z = atom.position.z;        
 
     // create text to display atom printableString
     const canvas = document.createElement('canvas');
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
+    /* canvas.width = 10;  
+    canvas.height = 10; 
+    const padding = 10; */
     canvas.width = containerWidth;
     canvas.height = containerHeight;
 
@@ -2399,19 +2067,15 @@ function drawAtomStr(atom) {
 
     atom.atomInfoSprite = sprite;
 
+    //console.log('atom.atomInfoSprite', atom.atomInfoSprite);
+    //console.log('atom', atom);
     root.add(sprite);
 
     renderer.render(scene, camera);
 }
 
-/**
- * Draws a white line between two selected atoms and labels line with distance (in angstroms)
- * 
- * @param {Object} object1 - atom
- * @param {Object} object2 - atom
- * @returns distance between two atoms in angstroms
- */
 function drawLine(object1, object2) {
+    let distance = calculateDistance(object1, object2);
 
     let x1 = object1.position.x;
     let y1 = object1.position.y;
@@ -2428,45 +2092,22 @@ function drawLine(object1, object2) {
         scale: 1,
         dashSize: 3,
         gapSize: 1,
-    });
+    } );
 
-    /** Note: atoms that use line drawing method require additional handling because of the way boxes are
-     * drawn in three.js - boxes are drawn from the center, not from an edge, so we take the atom 
-     * position and offset it so that the end of the box coincides with the actual atom position. 
-     * This means we store both the atomPosition (original position) and the position (offset position)
-     * for atoms of the lines drawing method. */
-    if (object1.drawingMethod == lines) {
-        x1 = object1.atomPosition.x;
-        y1 = object1.atomPosition.y;
-        z1 = object1.atomPosition.z;
-    }
-
-    if (object2.drawingMethod == lines) {
-        x2 = object2.atomPosition.x;
-        y2 = object2.atomPosition.y;
-        z2 = object2.atomPosition.z;
-    } 
-
+    // draw line between two atoms
     const points = [];
-    let pos1 = new THREE.Vector3(x1, y1, z1);
-    let pos2 = new THREE.Vector3(x2, y2, z2);
-    points.push(pos1, pos2);
-
-    // calculate distance between two atoms
-    let distance = (((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)**(1/2)).toFixed(4);
+    points.push(new THREE.Vector3(x1, y1, z1));
+    points.push(new THREE.Vector3(x2, y2, z2));
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
 
-    // draw line between two atoms
     const line = new THREE.Line(geometry, material);
     root.add(line);
-    object1.distanceLine = line;
-    object2.distanceLine = line;
     distanceLines.push(line);
-
     line.atoms = [object1, object2];
     line.distance = distance;
     line.repNum = currentRep;
+    //console.log('line', line);
 
     // create text to display distance
     const canvas = document.createElement('canvas');
@@ -2487,38 +2128,41 @@ function drawLine(object1, object2) {
     let y_cor = (y1 + y2) / 2; 
     let z_cor = (z1 + z2) / 2;
 
+    //console.log("canvas.width/2: ", containerWidth/2);
+    //console.log("canvas.height/2: ", containerHeight/2); 
     context.fillText(distance, canvas.width/2, canvas.height/2);
 
-    // create the texture from the canvas
+    // Create the texture from the canvas
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
 
-    // create a SpriteMaterial with the canvas texture
+    // Create a SpriteMaterial with the canvas texture
     const textMaterial = new THREE.SpriteMaterial({
         map: texture,
         transparent: true
     });
 
-    // create a Sprite using the material
+    // Create a Sprite using the material
     const sprite = new THREE.Sprite(textMaterial);
 
-    // set the size of the sprite (scale)
+    // Set the size of the sprite (scale)
     sprite.scale.set(textSize, textSize, textSize); 
+
     sprite.position.set(x_cor, y_cor+0.2, z_cor);
+
     line.add(sprite);
 
     renderer.render(scene, camera);
-
-    return distance;
 }
 
-function deleteBondDistances() {    
+function deleteBondDistances() {
+    console.log('in deleteBondDistances');
+    
     let objectsToRemove = [];
 
-    // removes sprites (labels), lines, and wireframes
     root.traverse( (obj) => {
         
-        if (obj.isSprite || obj.isLine || (obj.isMesh && obj.material && obj.material.wireframe)) {
+        if (obj.isSprite || obj.isLine) {
             objectsToRemove.push(obj);
         }
     })
@@ -2538,149 +2182,50 @@ function deleteHTMLBondLengths() {
 function resetMouseModes() {
     isDistanceMeasurementMode = false;
     isCenterMode = false;
+    isTranslateMode = false;
 
     document.body.style.cursor = 'auto';
 }
 
-
-//--------------------------------------
-// helper functions to draw frustrum ray to debug mouse clicking
-
-// TODO something wrong with frustrum ray, figure out later
-function vectorToString(v) {
-    return "("+v.x.toFixed(2)+','+
-        v.y.toFixed(2)+','+
-        v.z.toFixed(2)+')';
-}
-
-function drawFrustumRay(mx,my) {
-    var clickPositionNear = new THREE.Vector3( mx, my, 0 );
-    var clickPositionFar  = new THREE.Vector3( mx, my, 1 );
-    console.log("mx: "+mx+" my: "+my);
-    clickPositionNear.unproject(camera);
-    clickPositionFar.unproject(camera);
-    console.log("click near: "+JSON.stringify(clickPositionNear));
-    scene.add(createLine(clickPositionNear,clickPositionFar));
-}
-
-function createLine(a, b) {
-    var geom = new THREE.BufferGeometry();
-
-    // Define vertex positions as a Float32Array
-    var vertices = new Float32Array([
-        a.x, a.y, a.z,
-        b.x, b.y, b.z
-    ]);
-
-    // Define colors for each vertex
-    var colors = new Float32Array([
-        1, 0, 0,  // Color for point 'a'
-        0, 1, 0  // Color for point 'b'
-    ]);
-
-    // Assign attributes to geometry
-    geom.setAttribute('position', new THREE.BufferAttribute(vertices, 3)); // 3 values per vertex (x, y, z)
-    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3)); // RGB colors
-
-    // Define material with vertex colors
-    var mat = new THREE.LineBasicMaterial({ 
-        vertexColors: true, // Enable per-vertex colors
-        linewidth: 5 // Note: linewidth only works on Windows with WebGL1
-    });
-
-    return new THREE.Line(geom, mat);
-}
-
-
-function convertMousePositionToNDC(event) {
-    var mx = event.clientX;
-    var my = event.clientY;
-    // console.log("click at ("+mx+","+my+")");
-    var target = event.target;
-    // console.log("clicked on "+target);
-    var rect = target.getBoundingClientRect();
-    var cx = mx - rect.left;
-    var cy = my - rect.top;
-    var winXSize = rect.width || (rect.right - rect.left);
-    var winYSize = rect.height || (rect.bottom - rect.top);
-    var winHalfXSize = winXSize/2;
-    var winHalfYSize = winYSize/2;
-    // these are in NDC
-    var x = (cx - winHalfXSize) / winHalfXSize;
-    var y = (winHalfYSize - cy) / winHalfYSize;
-    // console.log("clicked on "+target+" at NDC ("+xNDC+","+xNDC+")");
-    var click = {mx: mx, my: my,
-                 cx: cx, cy: cy,
-                 winXSize: winXSize,
-                 winYSize: winYSize,
-                 x: x, y: y};
-    return click;
-}
-
-function handleMouseClick(mx,my,clickNear,clickFar) {
-    scene.add(createLine(clickNear,clickFar));
-}
-//--------------------------------------
-
-
-/**
- * Deals with mouse click on render screen. Gets objects intersecting with the mouse and deals with them.
- * Set drawRay to true if you want to draw the frustrum ray from mouse click (shift + click)
- * 
- * @param {Event} event - click event
- * (Sections adapted from Scott Anderson's raycasting code to draw frustrum ray from mouse click)
- */
+// on click 
 function raycast(event) {
 
-    if (drawRay) {
-        if (event.shiftKey) {
-
-            event.preventDefault();
-            var click = convertMousePositionToNDC(event);
-            var clickPositionNear = new THREE.Vector3( click.x, click.y, 0 );
-            var clickPositionFar  = new THREE.Vector3( click.x, click.y, 1 );
-        
-            clickPositionNear.unproject(camera);
-            clickPositionFar.unproject(camera);
-        
-            handleMouseClick(click.x, click.y, clickPositionNear, clickPositionFar );
-        }
-    }
-
-    // get mouse's location specific to given container size 
+    //get mouse location specific to given container size 
     var rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; // Adjust for container's width
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1; // Adjust for container's height
-
-    camera.near = 0.1;
-    camera.updateProjectionMatrix();
+    var containerRect = container.getBoundingClientRect(); // Get container's bounding rectangle
+    mouse.x = ((event.clientX - rect.left) / containerRect.width) * 2 - 1; // Adjust for container's width
+    mouse.y = -((event.clientY - rect.top) / containerRect.height) * 2 + 1; // Adjust for container's height
 
     raycaster.setFromCamera( mouse, camera );  
     raycaster.precision = 1;
+    raycaster.params.Points.threshold = 0.2;
+    //raycaster.far = 10000;
 
     let intersects = raycaster.intersectObjects(scene.children);
-    console.log("intersects", intersects);
+    //console.log("intersects", intersects);
    
     if (intersects.length > 0) { 
         let numAtoms = 0
         let currentAtom;
         let closestAtom = null;
 
+        let closestDistance = Infinity;
+
         for (const obj of intersects) {
+            if (obj.object.visible == true && obj.object.isMesh) {
+                if (obj.object.molecularElement == "atom") {
 
-            if (obj.object.visible == true && obj.object.isInstancedMesh) {
+                    // calculate distance of obj to camera
+                    const objectPosition = obj.object.getWorldPosition(new THREE.Vector3());
+                    const cameraPosition = camera.position;
+                    const distance = cameraPosition.distanceTo(objectPosition);
+                    //console.log('current distance', distance, obj.object.atomName);
 
-                let instanceID = obj.instanceId;
-                console.log('instancedID', instanceID);
-                console.log("obj found", obj);
-
-                if (obj.object.molecularElement == "atom") { // only atoms are clickable, bonds are not; check obj.molecularElement
-
-                    let key = getKey(obj.object, instanceID);
-                    closestAtom = metadataMap.get(key);
-                    console.log('closest atom', closestAtom);
-                    
-                    break;
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        //console.log('found closer, closestDistance', closestDistance, obj.object.atomName);
+                        closestAtom = obj.object;
+                    }
                 }
             }
         }
@@ -2690,28 +2235,31 @@ function raycast(event) {
             numAtoms = numAtoms + 1;
         }
     
-        if (numAtoms == 0) { return; }
+        if (numAtoms == 0) {
+            return;
+        };
 
         let previousAtom = selectedObject;
+
         selectedObject = currentAtom;
 
-        console.log("previously selected atom is", previousAtom);
-        console.log("currently selected atom is", currentAtom);
+        //console.log("previously selected atom is", previousAtom);
+        //console.log("currently selected atom is", currentAtom);
 
         if (isDistanceMeasurementMode) { // if selectionMode is on to measure distance between atoms
+            //console.log("isDistanceMeasurementMode on");
 
             if (distanceMeasurementAtoms.length == 0) {
 
-                console.log('currently has one atom');
+                console.log('HERE currently has one atom');
                 distanceMeasurementAtoms.push(currentAtom); // distanceMeasurementAtoms array currently has 1 atom in it
-
-                switchAtomState(currentAtom); 
+                // display atom printableStr
 
                 // if current atom has info printed, remove
                 if (currentAtom.atomInfoSprite != null) {
                     let tempSprite = currentAtom.atomInfoSprite;
                     
-                    tempSprite.material.map.dispose(); 
+                    tempSprite.material.map.dispose(); // Free up GPU memory
                     tempSprite.material.dispose();
                     tempSprite.geometry.dispose();
 
@@ -2728,12 +2276,11 @@ function raycast(event) {
             } else if (distanceMeasurementAtoms.length == 1) {
 
                 distanceMeasurementAtoms.push(currentAtom); // distanceMeasurementAtoms array currently has 2 atoms in it
-                console.log('currently has two atoms');
-                switchAtomState(currentAtom);
+                console.log('HERE currently has two atoms');
 
                 let existingLine = findExistingLine(distanceMeasurementAtoms[0], distanceMeasurementAtoms[1])
 
-                if (existingLine) { // if the two atoms in distanceMeasurementAtoms have a line between them, delete the line and the atom info
+                if (existingLine) { // if the two atoms in distanceMeasurementAtoms have a bond between them, delete the bond and the atom info
 
                     // delete sprite associated with line
                     if (existingLine.children.length > 0) {
@@ -2743,11 +2290,14 @@ function raycast(event) {
                             child.material.map.dispose(); // Free up GPU memory
                             child.material.dispose();
                             child.geometry.dispose();
+                            
                         });
                     }
 
                     // remove the line from the distanceLines array
                     distanceLines = distanceLines.filter(line => line !== existingLine);
+
+                    console.log('existingLine.distance', existingLine.distance);
 
                     // remove bond information from side panel
                     let bondLengthHTMLElems = Array.from(document.getElementsByClassName("bond-length")); 
@@ -2755,6 +2305,7 @@ function raycast(event) {
                     for (let elem of bondLengthHTMLElems) {
                         if (elem.textContent == ("bond length: " + existingLine.distance + " angstroms")) {
                             elem.remove();
+                            //console.log('elem removed', elem);
                         }
                     }
 
@@ -2766,27 +2317,31 @@ function raycast(event) {
                     // delete atom info strings for each atom
                     for (let atom of distanceMeasurementAtoms) {
                         console.log('atom', atom);
-
+                        console.log('atom.children', atom.children);
                         if (atom.atomInfoSprite != null) {
                             let tempSprite = atom.atomInfoSprite;
                             
-                            tempSprite.material.map.dispose();
-                            tempSprite.material.dispose();        
+                            tempSprite.material.map.dispose(); // Free up GPU memory
+                            tempSprite.material.dispose();
+                            //tempSprite.geometry.dispose();
+        
                             atom.atomInfoSprite = null;  
                             root.remove(tempSprite);
+        
                         }
                     }
+                    
                     console.log("Removed existing bond and labels");
 
                 } else {
-                    console.log("distanceMeasurementAtoms", distanceMeasurementAtoms);
 
-                    let distance = drawLine(distanceMeasurementAtoms[0], distanceMeasurementAtoms[1]);
+                    drawLine(distanceMeasurementAtoms[0], distanceMeasurementAtoms[1]);
+
                     drawAtomStr(distanceMeasurementAtoms[1]);
 
                     // add bond length information to left panel
                     var bond_para = document.createElement('p')
-                    bond_para.textContent = 'bond length: ' + distance + " angstroms";
+                    bond_para.textContent = 'bond length: ' + calculateDistance(distanceMeasurementAtoms[0], distanceMeasurementAtoms[1]).toString() + " angstroms";
                     bond_para.classList.add("bond-length");
                     bondLengthContent.appendChild(bond_para); 
                 }
@@ -2796,8 +2351,10 @@ function raycast(event) {
                 distanceMeasurementAtoms = []; // clear array
                 distanceMeasurementAtoms.push(currentAtom); // now the array has 1 atom in it
 
-                switchAtomState(currentAtom);
-
+                console.log('currentAtom', currentAtom);
+                console.log('currentAtom children', currentAtom.children);
+                console.log('current atom children length', currentAtom.children.length);
+                
                 // if current atom has info printed, remove
                 if (currentAtom.atomInfoSprite != null) {
                     let tempSprite = currentAtom.atomInfoSprite;
@@ -2817,28 +2374,21 @@ function raycast(event) {
                 return;
             };
 
-        } else if (isCenterMode) { 
-            // center rotation around selected atom
-
+        } else if (isCenterMode) {
             console.log('in isCenterMode');
             let camPos = camera.position.clone();
             console.log("camera.position before", camPos);
 
-            let obj = selectedObject.instancedMesh;
-            let instancedMesh = obj.instancedMesh;
+            let container = document.getElementsByClassName('column middle')[0];
             
+            // center rotation around current atom
             if (camera.isOrthographicCamera) { // orthographic camera, uses imported controls
-                
                 // Calculate the shift in target position
-                const instanceMatrix = new THREE.Matrix4();
-                const worldMatrix = new THREE.Matrix4();
-                const worldPosition = new THREE.Vector3();
+                let objWorldPosition = new THREE.Vector3();
+                selectedObject.getWorldPosition(objWorldPosition);
+                
 
-                instancedMesh.getMatrixAt(selectedObject.instanceID, instanceMatrix);
-                worldMatrix.multiplyMatrices(instancedMesh.matrixWorld, instanceMatrix);
-                worldMatrix.decompose(worldPosition, new THREE.Quaternion(), new THREE.Vector3());
-
-                controls.setOrbitPoint(worldPosition.x, worldPosition.y, worldPosition.z);
+                controls.setOrbitPoint(objWorldPosition.x, objWorldPosition.y, objWorldPosition.z);
                 
                 //camera.position.copy(camPos);
                 //camera.lookAt(prevTarget);
@@ -2851,13 +2401,13 @@ function raycast(event) {
 
             return;
 
-        } else { // not distance measurement or centering mode
+        } else {
             if (!(previousAtom == null)) { // if there was a previously-selected object
                 if (previousAtom == currentAtom) { // if previous selected object is the same as currently selected object
                     switchAtomState(currentAtom); // switch current atom's state
                     return;
                 } else { // if clicking on a different atom
-                    removeWireFrame(previousAtom); // reset previously-clicked atom
+                    resetAtomState(previousAtom); // reset previously-clicked atom
                     switchAtomState(currentAtom); // switch current atom's state
                     return;
                 };
@@ -2866,47 +2416,49 @@ function raycast(event) {
                 return;
             }            
         };  
-    } 
+    } else {
+        // console.log("doesn't intersect");
+    }
 } 
 
-/**
- * Make loading screen appear
- */
 function popup() {
     let popup = document.getElementById("loading-popup");
     popup.style.display = 'block';
 }
 
-/**
- * Make loading screen disappear
- */
 function popdown() {
     let popup = document.getElementById("loading-popup");
     popup.style.display = "none";
 } 
 
 
-/**
- * Get radius size of a given atom element
- */
-function getRadius(atom) {
-    const radii = {
-        br: 1.83,
-        c: 1.7,
-        cl: 1.75,
-        f: 1.35,
-        h: 1.2,
-        n: 1.55,
-        o: 1.52,
-        s: 1.80,
-    };
+// get radius size of a given atom name 
+function getRadius(atom){
+    let rad; 
 
-    atom = atom.toLowerCase();
-    const radius = radii[atom];
+    if(atom == "Br"){
+        rad = 1.83 }
 
-    if (radius == undefined) {
-        return 1;
-    }
+    if(atom == "C"){
+        rad = 1.7 }
 
-    return radius;
+    if(atom == "Cl"){
+        rad = 1.75}
+
+    if(atom == "F"){
+        rad = 1.35 }
+
+    if(atom == "H"){
+        rad = 1.2 }
+
+    if(atom == "N"){
+        rad = 1.55 }
+
+    if(atom == "O"){
+        rad = 1.52 }
+
+    if(atom == "S"){
+        rad = 1.80 }
+
+    return rad; 
 }
