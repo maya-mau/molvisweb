@@ -1,4 +1,4 @@
-# MolVisWeb (dev)
+# MolVisWeb
 
 This is the main repository for MolVisWeb, my senior thesis project.
 
